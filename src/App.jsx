@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 
+const GOOGLE_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 const API_BASE = "http://localhost:8000";
 
 const asArray = (v) => {
@@ -105,7 +106,6 @@ function App() {
             );
           })}
         </div>
-
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6">
           {activeTab === "comptable" && <ComptableTab />}
           {activeTab === "administratif" && <AdministratifTab />}
@@ -124,6 +124,28 @@ function ComptableTab() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [showFournisseurModal, setShowFournisseurModal] = useState(false);
+  const [fournisseurData, setFournisseurData] = useState({
+    raison_sociale: "",
+    siren: "",
+    compte_charge: "",
+    code_routage: "",
+    bic: "",
+    tva_intracom: "",
+    iban: "",
+    delai_paiement: "",
+    paiement_direct: false,
+    adresse: "",
+    complement: "",
+    code_postal: "",
+    ville: "",
+    pays: "France",
+    tel_fixe: "",
+    tel_portable: "",
+    email: "",
+  });
+  const [fournisseurLoading, setFournisseurLoading] = useState(false);
+  const [fournisseurSuccess, setFournisseurSuccess] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -151,11 +173,27 @@ function ComptableTab() {
         try {
           const response = await axios.post(
             `${API_BASE}/api/comptable/extract`,
-            {
-              image_base64: reader.result,
-            },
+            { image_base64: reader.result },
           );
           setResult(response.data);
+
+          // Pré-remplir le modal avec les infos fournisseur extraites par l'IA
+          if (response.data.fournisseur_infos) {
+            const infos = response.data.fournisseur_infos;
+            setFournisseurData((prev) => ({
+              ...prev,
+              raison_sociale:
+                infos.raison_sociale || response.data.fournisseur || "",
+              siren: infos.siren || "",
+              tva_intracom: infos.tva_intracom || "",
+              adresse: infos.adresse || "",
+              code_postal: infos.code_postal || "",
+              ville: infos.ville || "",
+              pays: infos.pays || "France",
+              email: infos.email || "",
+              tel_fixe: infos.tel_fixe || "",
+            }));
+          }
         } catch (err) {
           console.error(err);
           setError("Erreur lors de l'extraction");
@@ -169,6 +207,52 @@ function ComptableTab() {
       setError("Erreur de lecture du fichier");
       setLoading(false);
     }
+  };
+
+  const handleFournisseurSubmit = async (e) => {
+    e.preventDefault();
+    if (!fournisseurData.raison_sociale) return;
+    setFournisseurLoading(true);
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "fournisseur",
+          ...fournisseurData,
+        }),
+      });
+      setFournisseurSuccess(true);
+      setFournisseurData({
+        raison_sociale: "",
+        siren: "",
+        compte_charge: "",
+        code_routage: "",
+        bic: "",
+        tva_intracom: "",
+        iban: "",
+        delai_paiement: "",
+        paiement_direct: false,
+        adresse: "",
+        complement: "",
+        code_postal: "",
+        ville: "",
+        pays: "France",
+        tel_fixe: "",
+        tel_portable: "",
+        email: "",
+      });
+      setTimeout(() => {
+        setFournisseurSuccess(false);
+        setShowFournisseurModal(false);
+      }, 2000);
+    } catch (error) {
+      console.error(error);
+    }
+    setFournisseurLoading(false);
   };
 
   return (
@@ -213,19 +297,28 @@ function ComptableTab() {
             </label>
           )}
         </div>
-        <button
-          type="submit"
-          disabled={loading || !image}
-          className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3 rounded-xl font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {loading ? (
-            <>
-              <Loader2 className="animate-spin" size={20} /> Extraction...
-            </>
-          ) : (
-            "Extraire la facture"
-          )}
-        </button>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="submit"
+            disabled={loading || !image}
+            className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3 rounded-xl font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="animate-spin" size={20} /> Extraction...
+              </>
+            ) : (
+              "Extraire la facture"
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFournisseurModal(true)}
+            className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 rounded-xl font-medium flex items-center justify-center gap-2 hover:shadow-lg transition"
+          >
+            <span>➕</span> Créer le fournisseur
+          </button>
+        </div>
       </form>
 
       {error && <p className="mt-4 text-red-600 text-sm">{error}</p>}
@@ -238,10 +331,7 @@ function ComptableTab() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Info label="Titulaire" value="GOURDON Cyril" />
             <Info label="Fournisseur" value={result.fournisseur} />
-            <Info label="Paiement direct" value="Non" />
-            <Info label="Note de frais" value="Non" />
             <Info label="Date facture" value={result.date} />
-            <Info label="Provenance" value="France" />
             <Info label="Numéro facture" value={result.numero_facture || "-"} />
             <Info
               label="Montant HT"
@@ -265,16 +355,21 @@ function ComptableTab() {
           </div>
           {result.lignes?.length > 0 && (
             <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-emerald-900">
-                Lignes (Désignation / Libellé) :
-              </h4>
+              <h4 className="font-semibold mb-2 text-emerald-900">Lignes :</h4>
               <div className="space-y-2">
                 {result.lignes.map((ligne, i) => (
                   <div
                     key={i}
                     className="bg-white p-3 rounded-lg flex justify-between border border-emerald-100"
                   >
-                    <span className="font-medium">{ligne.designation}</span>
+                    <div>
+                      <span className="font-medium">{ligne.designation}</span>
+                      {ligne.libelle && ligne.libelle !== ligne.designation && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {ligne.libelle}
+                        </p>
+                      )}
+                    </div>
                     <span className="font-semibold text-emerald-700">
                       {ligne.prixFinal} €
                     </span>
@@ -283,12 +378,228 @@ function ComptableTab() {
               </div>
             </div>
           )}
-          <div className="mt-4 p-3 bg-emerald-100 rounded-lg text-sm text-emerald-800">
-            ✓ Données envoyées vers Google Sheets (format Evolbee) et
-            sauvegardées en base PostgreSQL
+          {result.fournisseur_infos && (
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <h4 className="font-semibold mb-2 text-blue-900">
+                ℹ️ Infos fournisseur extraites par l'IA
+              </h4>
+              <p className="text-sm text-blue-800">
+                Cliquez sur "Créer le fournisseur" pour les enregistrer dans
+                Google Sheets.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL FOURNISSEUR */}
+      {showFournisseurModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+              <h3 className="text-xl font-bold">Créer un fournisseur</h3>
+              <button
+                onClick={() => setShowFournisseurModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleFournisseurSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <InputField
+                  label="Raison Sociale *"
+                  value={fournisseurData.raison_sociale}
+                  onChange={(v) =>
+                    setFournisseurData({
+                      ...fournisseurData,
+                      raison_sociale: v,
+                    })
+                  }
+                  required
+                />
+                <InputField
+                  label="SIREN"
+                  value={fournisseurData.siren}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, siren: v })
+                  }
+                />
+                <InputField
+                  label="Compte de charge *"
+                  value={fournisseurData.compte_charge}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, compte_charge: v })
+                  }
+                  required
+                />
+                <InputField
+                  label="Code de routage"
+                  value={fournisseurData.code_routage}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, code_routage: v })
+                  }
+                />
+                <InputField
+                  label="BIC"
+                  value={fournisseurData.bic}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, bic: v })
+                  }
+                />
+                <InputField
+                  label="N° TVA Intracomm. *"
+                  value={fournisseurData.tva_intracom}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, tva_intracom: v })
+                  }
+                  required
+                />
+                <InputField
+                  label="IBAN"
+                  value={fournisseurData.iban}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, iban: v })
+                  }
+                />
+                <InputField
+                  label="Délai de paiement"
+                  value={fournisseurData.delai_paiement}
+                  onChange={(v) =>
+                    setFournisseurData({
+                      ...fournisseurData,
+                      delai_paiement: v,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
+                <input
+                  type="checkbox"
+                  checked={fournisseurData.paiement_direct}
+                  onChange={(e) =>
+                    setFournisseurData({
+                      ...fournisseurData,
+                      paiement_direct: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4"
+                />
+                <label className="text-sm font-medium">Paiement direct</label>
+              </div>
+
+              <h4 className="font-bold text-gray-700 pt-2 border-t">Adresse</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <InputField
+                  label="Adresse"
+                  value={fournisseurData.adresse}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, adresse: v })
+                  }
+                />
+                <InputField
+                  label="Complément"
+                  value={fournisseurData.complement}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, complement: v })
+                  }
+                />
+                <InputField
+                  label="Code postal"
+                  value={fournisseurData.code_postal}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, code_postal: v })
+                  }
+                />
+                <InputField
+                  label="Ville"
+                  value={fournisseurData.ville}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, ville: v })
+                  }
+                />
+                <InputField
+                  label="Pays"
+                  value={fournisseurData.pays}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, pays: v })
+                  }
+                />
+              </div>
+
+              <h4 className="font-bold text-gray-700 pt-2 border-t">
+                Coordonnées
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <InputField
+                  label="Tel Fixe"
+                  value={fournisseurData.tel_fixe}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, tel_fixe: v })
+                  }
+                />
+                <InputField
+                  label="Tel Portable"
+                  value={fournisseurData.tel_portable}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, tel_portable: v })
+                  }
+                />
+                <InputField
+                  label="Email"
+                  value={fournisseurData.email}
+                  onChange={(v) =>
+                    setFournisseurData({ ...fournisseurData, email: v })
+                  }
+                  type="email"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowFournisseurModal(false)}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl font-medium hover:bg-gray-50"
+                >
+                  Fermer
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    fournisseurLoading || !fournisseurData.raison_sociale
+                  }
+                  className="flex-1 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-medium disabled:opacity-50"
+                >
+                  {fournisseurLoading
+                    ? "Enregistrement..."
+                    : fournisseurSuccess
+                      ? "✓ Enregistré !"
+                      : "Enregistrer"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function InputField({ label, value, onChange, required, type = "text" }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={required}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
     </div>
   );
 }
@@ -309,10 +620,7 @@ function AdministratifTab() {
     try {
       const response = await axios.post(
         `${API_BASE}/api/administratif/response`,
-        {
-          content: message,
-          type,
-        },
+        { content: message, type },
       );
       setResult(response.data);
     } catch (err) {
@@ -343,11 +651,7 @@ function AdministratifTab() {
               key={t}
               type="button"
               onClick={() => setType(t)}
-              className={`py-2 rounded-lg font-medium capitalize ${
-                type === t
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-600"
-              }`}
+              className={`py-2 rounded-lg font-medium capitalize ${type === t ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}
             >
               {t}
             </button>
@@ -478,11 +782,7 @@ function MarketingTab() {
               key={v}
               type="button"
               onClick={() => setDocType(v)}
-              className={`py-2 rounded-lg font-medium ${
-                docType === v
-                  ? "bg-pink-600 text-white"
-                  : "bg-gray-100 text-gray-600"
-              }`}
+              className={`py-2 rounded-lg font-medium ${docType === v ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-600"}`}
             >
               {l}
             </button>
@@ -539,7 +839,6 @@ function MarketingTab() {
               {asString(result.feedback) || "Aucun feedback"}
             </p>
           </div>
-
           {asArray(result.improvements).length > 0 && (
             <div className="bg-white p-4 rounded-xl border border-gray-200">
               <h3 className="font-bold mb-2">Améliorations suggérées</h3>
@@ -573,9 +872,7 @@ function CommercialTab() {
     setError(null);
     try {
       const response = await axios.post(
-        `${API_BASE}/api/commercial/prospect-strategy?secteur=${encodeURIComponent(
-          secteur,
-        )}&localisation=${encodeURIComponent(localisation)}`,
+        `${API_BASE}/api/commercial/prospect-strategy?secteur=${encodeURIComponent(secteur)}&localisation=${encodeURIComponent(localisation)}`,
       );
       setResult(response.data);
     } catch (err) {
@@ -669,9 +966,7 @@ function SEOTab() {
     setError(null);
     try {
       const response = await axios.post(
-        `${API_BASE}/api/seo/analyze?url=${encodeURIComponent(
-          url,
-        )}&focus_keyword=${encodeURIComponent(keyword)}`,
+        `${API_BASE}/api/seo/analyze?url=${encodeURIComponent(url)}&focus_keyword=${encodeURIComponent(keyword)}`,
       );
       setResult(response.data);
     } catch (err) {
@@ -735,7 +1030,6 @@ function SEOTab() {
           >
             <X size={20} />
           </button>
-
           <div
             className={`bg-gradient-to-r ${getScoreColor(Number(result.seo_score) || 0)} p-6 rounded-xl text-white`}
           >
@@ -761,7 +1055,6 @@ function SEOTab() {
               </div>
             </div>
           </div>
-
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat
               label="Images sans alt"
@@ -784,7 +1077,6 @@ function SEOTab() {
               color={result.meta_description ? "green" : "red"}
             />
           </div>
-
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-green-50 p-4 rounded-xl border border-green-200">
               <h3 className="font-bold text-green-900 mb-2">✓ Points forts</h3>
@@ -807,7 +1099,6 @@ function SEOTab() {
               </ul>
             </div>
           </div>
-
           <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
             <h3 className="font-bold text-blue-900 mb-2">💡 Recommandations</h3>
             <ul className="space-y-1">
@@ -818,7 +1109,6 @@ function SEOTab() {
               ))}
             </ul>
           </div>
-
           {asString(result.html_suggestion) && (
             <div className="bg-gray-900 p-4 rounded-xl">
               <div className="flex justify-between items-center mb-2">
@@ -872,7 +1162,6 @@ function Card({ title, value, color }) {
   };
   const classes =
     colorClasses[color] || "bg-gray-50 border-gray-200 text-gray-900";
-
   return (
     <div className={`p-4 rounded-xl border ${classes}`}>
       <h4 className="font-bold mb-1 text-sm uppercase">{title}</h4>
@@ -889,7 +1178,6 @@ function Stat({ label, value, color }) {
     purple: "bg-purple-100 text-purple-800",
   };
   const classes = colorClasses[color] || "bg-gray-100 text-gray-800";
-
   return (
     <div className={`${classes} p-3 rounded-lg text-center`}>
       <p className="text-xs opacity-75">{label}</p>
