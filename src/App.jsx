@@ -10,9 +10,9 @@ import {
   Copy,
   Check,
   X,
+  Building2,
 } from "lucide-react";
 
-const GOOGLE_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 const API_BASE = "http://localhost:8000";
 
 const asArray = (v) => {
@@ -41,6 +41,12 @@ function App() {
       label: "Comptable",
       icon: FileText,
       color: "from-emerald-500 to-teal-600",
+    },
+    {
+      id: "fournisseurs",
+      label: "Fournisseurs",
+      icon: Building2,
+      color: "from-cyan-500 to-blue-600",
     },
     {
       id: "administratif",
@@ -106,8 +112,10 @@ function App() {
             );
           })}
         </div>
+
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6">
           {activeTab === "comptable" && <ComptableTab />}
+          {activeTab === "fournisseurs" && <FournisseursTab />}
           {activeTab === "administratif" && <AdministratifTab />}
           {activeTab === "marketing" && <MarketingTab />}
           {activeTab === "commercial" && <CommercialTab />}
@@ -173,7 +181,9 @@ function ComptableTab() {
         try {
           const response = await axios.post(
             `${API_BASE}/api/comptable/extract`,
-            { image_base64: reader.result },
+            {
+              image_base64: reader.result,
+            },
           );
           setResult(response.data);
 
@@ -214,17 +224,7 @@ function ComptableTab() {
     if (!fournisseurData.raison_sociale) return;
     setFournisseurLoading(true);
     try {
-      await fetch(GOOGLE_SCRIPT_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type: "fournisseur",
-          ...fournisseurData,
-        }),
-      });
+      await axios.post(`${API_BASE}/api/fournisseurs`, fournisseurData);
       setFournisseurSuccess(true);
       setFournisseurData({
         raison_sociale: "",
@@ -250,7 +250,12 @@ function ComptableTab() {
         setShowFournisseurModal(false);
       }, 2000);
     } catch (error) {
-      console.error(error);
+      if (error.response?.status === 409) {
+        alert("⚠️ Ce SIREN existe déjà dans la base");
+      } else {
+        console.error(error);
+        alert("Erreur lors de l'enregistrement");
+      }
     }
     setFournisseurLoading(false);
   };
@@ -384,8 +389,8 @@ function ComptableTab() {
                 ℹ️ Infos fournisseur extraites par l'IA
               </h4>
               <p className="text-sm text-blue-800">
-                Cliquez sur "Créer le fournisseur" pour les enregistrer dans
-                Google Sheets.
+                Cliquez sur "Créer le fournisseur" pour les enregistrer dans la
+                base.
               </p>
             </div>
           )}
@@ -400,7 +405,7 @@ function ComptableTab() {
               <h3 className="text-xl font-bold">Créer un fournisseur</h3>
               <button
                 onClick={() => setShowFournisseurModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-2xl"
+                className="text-gray-400 hover:text-gray-600"
               >
                 <X size={24} />
               </button>
@@ -581,6 +586,104 @@ function ComptableTab() {
               </div>
             </form>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FournisseursTab() {
+  const [fournisseurs, setFournisseurs] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const loadFournisseurs = async (q = "") => {
+    setLoading(true);
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/fournisseurs?search=${encodeURIComponent(q)}`,
+      );
+      setFournisseurs(res.data.fournisseurs);
+    } catch (err) {
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadFournisseurs();
+  }, []);
+
+  const handleSearch = (e) => {
+    const val = e.target.value;
+    setSearch(val);
+    loadFournisseurs(val);
+  };
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold mb-2">Base Fournisseurs</h2>
+      <p className="text-gray-600 mb-6">
+        Tous vos fournisseurs centralisés dans PostgreSQL
+      </p>
+
+      <div className="mb-4">
+        <input
+          type="text"
+          value={search}
+          onChange={handleSearch}
+          placeholder="🔍 Rechercher par raison sociale, SIREN ou ville..."
+          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-cyan-500"
+        />
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="animate-spin text-cyan-600" size={32} />
+        </div>
+      ) : fournisseurs.length === 0 ? (
+        <div className="text-center py-12 text-gray-500">
+          <Building2 className="mx-auto mb-3 text-gray-400" size={48} />
+          <p>Aucun fournisseur enregistré</p>
+          <p className="text-sm mt-1">
+            Utilisez le bouton "Créer le fournisseur" dans l'onglet Comptable
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {fournisseurs.map((f) => (
+            <div
+              key={f.id}
+              className="bg-gradient-to-r from-cyan-50 to-blue-50 p-4 rounded-xl border border-cyan-200"
+            >
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <h3 className="font-bold text-lg text-cyan-900">
+                    {f.raison_sociale}
+                  </h3>
+                  {f.siren && (
+                    <p className="text-xs text-gray-600">SIREN : {f.siren}</p>
+                  )}
+                </div>
+                <span className="text-xs bg-cyan-200 text-cyan-800 px-2 py-1 rounded-full">
+                  {f.ville || "France"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                {f.tva_intracom && (
+                  <Info label="TVA Intracom." value={f.tva_intracom} />
+                )}
+                {f.email && <Info label="Email" value={f.email} />}
+                {f.tel_portable && <Info label="Tél." value={f.tel_portable} />}
+                {f.compte_charge && (
+                  <Info label="Compte charge" value={f.compte_charge} />
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Ajouté le {new Date(f.created_at).toLocaleDateString("fr-FR")}
+              </p>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -1055,6 +1158,7 @@ function SEOTab() {
               </div>
             </div>
           </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat
               label="Images sans alt"
@@ -1077,6 +1181,7 @@ function SEOTab() {
               color={result.meta_description ? "green" : "red"}
             />
           </div>
+
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-green-50 p-4 rounded-xl border border-green-200">
               <h3 className="font-bold text-green-900 mb-2">✓ Points forts</h3>
@@ -1099,6 +1204,7 @@ function SEOTab() {
               </ul>
             </div>
           </div>
+
           <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
             <h3 className="font-bold text-blue-900 mb-2">💡 Recommandations</h3>
             <ul className="space-y-1">
@@ -1109,14 +1215,15 @@ function SEOTab() {
               ))}
             </ul>
           </div>
-          {asString(result.html_suggestion) && (
+
+          {asString(result.html_snippet) && (
             <div className="bg-gray-900 p-4 rounded-xl">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="font-bold text-white">Snippet HTML/Tailwind</h3>
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(
-                      asString(result.html_suggestion),
+                      asString(result.html_snippet),
                     );
                     alert("Code copié !");
                   }}
@@ -1127,7 +1234,7 @@ function SEOTab() {
               </div>
               <div className="bg-black rounded-lg p-3 max-h-64 overflow-y-auto">
                 <pre className="text-xs text-green-400 whitespace-pre-wrap break-all font-mono">
-                  {asString(result.html_suggestion)}
+                  {asString(result.html_snippet)}
                 </pre>
               </div>
             </div>
